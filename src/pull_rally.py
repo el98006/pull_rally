@@ -9,21 +9,38 @@ import os
 import urllib2
 import json
 
+ROOT_DIR  = os.path.expanduser('~/Downloads/rally_dump')
+    
+    
+INDEX_PAGE_HEADER = '<!DOCTYPE html> \
+    <html><head><title>Platform Team User Stories </title> <link rel="stylesheet" href="css/bootstrap.min.css"> </head>\
+    <body><p class="title"><b>Platform team User Stories</b></p> \
+    <table class="table table-striped">\
+    <thead> <tr> <th>ID</th> <th>Desc</th> <th>State</th> <th>CreationDate</th> </tr> <thead>\
+    <tbody>' 
+INDEX_PAGE_FOOTER = '</tbody> </table> </body> </html>'   
+    
+XML_FILENAME = 'Rally-Stories.xml'
 
 
 
-skip_list = ['FormattedID', 'ObjectID', 'Name']
-field_name_mapping = {'c_ECommKanbanState':'State', 'c_ReleaseDate':'ReleaseDate', 'c_RT':'RT', 'c_ReleasePlan':'ReleasePlan'}
-field_seq = [ 'Description', 'Notes', 'Attachments', 'Tasks',  'Defects', 'Discussion', 'Owner', 'c_RT', 'c_ECommKanbanState', 'c_ReleaseDate','c_ReleasePlan', 'TestCase']
-html_template = {'Defects':'<li> <a href="{}" > {} </a> {} </li>', 'Discussion':'<li> <p class="text-muted"> {}  at {} </p> <p> {} </p> </li>',\
-                 'Tasks':'<li> <a href="{}" > {} </a> {} </li>', 'Attachments':'<li> <a href="{}"> {} </a> </li>'}
+LINE_CAP = 30
+
+SIMPLE_ELEMENT = ['ObjectID','FormattedID','Name','Description', 'Notes','DirectChildrenCount', 'HasParent', 'c_ECommKanbanState', 'c_ReleaseDate','c_RT','c_ReleasePlan']
+ARRAY_ELEMENT = ['Defects',  'Discussion', 'Tasks', 'TestCases', 'Attachments','Projects', 'Children', 'TestCases', 'Tags']
+    
+INDEX_PAGE_REC_TEMPLATE ='<tr> <td> <a href="{}"> {}</a> </td> <td>{}</td> <td>{}</td> <td>{}</td> </tr>'
+SKIP_LIST = ['FormattedID', 'ObjectID', 'Name']
 
 DETAIL_PAGE_HEADER_TEMPLATE = '<html><head><title> {} </title> <link rel="stylesheet" href="css/bootstrap.min.css"> </head> <body> <p class="title"> <h2> {} </h2></p>'
+DETAIL_PAGE_STYLE = '<style> panel panel_default { padding-left: 80px; background-color:#f2f2f2}</style>'
 DETAIL_PAGE_FOOTER_TEMPLATE = '</body> </html>'
-DETAIL_PAGE_SECTION_HEADER_TEMPLATE = '<p class="lead"> <h3> {} </h3></p> {}'
 
-
-    
+DETAIL_PAGE_SECTION_TEMPLATE = '<h3> {heading} </h3> <div class="panel panel-default"> <div class="panel-body"> {body} </div> </div>'
+SECTION_IN_SEQUENCE = [ 'Description', 'Notes', 'Attachments', 'Tasks',  'Defects', 'Discussion', 'Tags', 'Owner', 'c_RT', 'c_ECommKanbanState', 'c_ReleaseDate','c_ReleasePlan', 'TestCase']
+DETAIL_BODY_TEMPLATE = {'Defects':'<li> <a href="{}" > {} </a> {} </li>', 'Discussion':'<li> <p class="text-muted"> <small>{} </small> at {} </p> <p> {} </p> </li>',\
+                 'Tasks':'<li> <a href="{}" > {} </a> {} </li>', 'Attachments':'<li> <a href="{}"> {} </a> </li>'}
+HEADING_MAPPING = {'c_ECommKanbanState':'State', 'c_ReleaseDate':'ReleaseDate', 'c_RT':'RT', 'c_ReleasePlan':'ReleasePlan'}
 
 def non_blank_element(content):
     p = ['NONE', 'False', 'false','0','0.0']
@@ -44,38 +61,25 @@ def authenticate_http():
     '''install the opener, so all the future urllib.urlopen urlib2.request will base on this opener'''
 
 
-def pack_in_html(gen_tuples, element_type):
-    
-    for value_tuple in gen_tuples:
-        line = html_template[element_type].format(*value_tuple)    
-        yield line
-        
-        
-def write_detail_line(fh, details):   
-    for field in field_seq:
-        try:
-            html_body = details[field]
-            if field in field_name_mapping:
-                field = field_name_mapping[field]
-            line = DETAIL_PAGE_SECTION_HEADER_TEMPLATE.format(field, html_body)
-        except KeyError:
-            continue
-        fh.writelines(line)
-        
 
-def generate_detail_page(details, out_dir):
-    if details['ObjectID']:
-        fname = details['ObjectID']
+def wrap_section_body_in_html(heading, details):
+#heading, SECTION_SERIES
+#details array of tuples
+    
+    
+    #create unordered list if body is an array
+    if heading is 'Tags':
+        html_result = details
+    elif heading in ARRAY_ELEMENT:
+        result  = ['<ul>']
+        for line in details:
+            html_line = DETAIL_BODY_TEMPLATE[heading].format(*line)
+            result.append(html_line)    
+        result.append('</ul>')
+        html_result = ''.join(result)
     else:
-        fname = 'dummy'
-    fp = os.path.join(out_dir,fname+'.html')
-        
-    with open(fp, 'wt') as fh:
-        title = details['FormattedID'] + ':' + details['Name']
-        line = DETAIL_PAGE_HEADER_TEMPLATE.format(title,title) 
-        fh.writelines(line)
-        write_detail_line(fh, details)
-        fh.writelines(DETAIL_PAGE_FOOTER_TEMPLATE)
+        html_result =  details
+    return html_result      
 
 
 
@@ -90,22 +94,7 @@ def download_conversation_details(gen_urls):
         p_timestamp = root.get('ConversationPost').get('CreationDate') 
         yield  p_user, p_timestamp, p_text,
         
-        
-        
-def conversation_handler(xml_element):
 
-    authenticate_http()
-    
-    generator_url = extract_from_itemarray(xml_element)
-    generator_tuples = download_conversation_details(generator_url)
-    element_type = xml_element.tag
-    html_lines = pack_in_html(generator_tuples, element_type)
-    
-    array_list = ['<ul>']
-    for line in html_lines:
-        array_list.append(line)
-    array_list.append('</ul>')
-    return array_list
     
 def download_task_details(gen_url=None):
     
@@ -120,17 +109,6 @@ def download_task_details(gen_url=None):
         link = os. path.join('./Task', str(ta_id), '.html')       
         yield link, ta_name, ta_desc    
 
-def tasks_handler(xml_element):
-    generator_details_url = extract_from_itemarray(xml_element)
-    generator_task_tuples = download_task_details(generator_details_url)
-    element_type = xml_element.tag
-    html_lines = pack_in_html(generator_task_tuples, element_type)
-
-    array_list = ['<ul>']
-    for line in html_lines:
-        array_list.append(line)
-    array_list.append('</ul>')
-    return array_list
 
 
 def download_attachment_details(detail_urls):
@@ -172,20 +150,7 @@ def download_attachment_details(detail_urls):
         
         yield  t_link.encode('utf-8'), t_content_name.encode('utf-8') 
         
-def attachment_handler(xml_element):
-    
-    generator_detail_urls = extract_from_itemarray(xml_element)
-    generator_attachment_tuples = download_attachment_details(generator_detail_urls)
-    element_type = xml_element.tag
-    html_lines = pack_in_html(generator_attachment_tuples, element_type)
-    
-    array_html_lines = []
-    array_html_lines.append('<ul>')
-    for  line in html_lines:
-        array_html_lines.append(line) 
-    array_html_lines.append('</ul>')
-    return array_html_lines
-    
+
 
 def download_defect_details(gen_url):
     
@@ -206,57 +171,49 @@ def extract_from_itemarray(xml_element):
         yield url_ref
 
 
+
+def get_tags(xml_element):
+    tag_list =[]
+    tag_num = xml_element.find('Count')
+    
+    # if number of tags > 0
+    if tag_num <> '0':    
+        my_tags = xml_element.find('_tagsNameArray')
+        for my_tag in my_tags:
+            x = my_tag.find('Name').text
+            tag_list.append(x)
+        tags = ','.join(tag_list)
         
-def defect_handler(xml_element):
-
-    generator_details_url = extract_from_itemarray(xml_element)
-    generator_defect_tuples = download_defect_details(generator_details_url)
-    element_type = xml_element.tag
-    html_lines = pack_in_html(generator_defect_tuples, element_type)
+        return tags
+    else:
+        return None
     
-    #current the routing of handler functions return an array of html, instead of generator
-    array_html_lines = []
-    array_html_lines.append('<ul>')
-    for  line in html_lines:
-        array_html_lines.append(line) 
-    array_html_lines.append('</ul>')
-    return array_html_lines
-
-
-
-def commmon_handler(xml_element):
+def commmon_array_handler(xml_element):
     SECTION_HANDLING_FUNCTIONS = {'Discussion':download_conversation_details, 'Attachments':download_attachment_details, \
-                               'Defects':download_defect_details, 'Tasks':download_task_details}
+    'Defects':download_defect_details, 'Tasks':download_task_details}
 
     element_type = xml_element.tag
-    generator_urls = extract_from_itemarray(xml_element)
-    generator_tuples = SECTION_HANDLING_FUNCTIONS[element_type](generator_urls)
     
+    if element_type == 'Tags':
+        tags = get_tags(xml_element)
+        return tags
+    else:
+        generator_urls = extract_from_itemarray(xml_element)
+        generator_tuples = SECTION_HANDLING_FUNCTIONS[element_type](generator_urls)
     return generator_tuples
 
-def default_handler(item):
-    array_list = []
-    for item in item.find('_itemRefArray'):
-        url_ref = item.attrib['ref']
-        array_list.append('<p>' + url_ref + '</p>')
-    return array_list
 
 def get_story_details(us_element):
-    simple_elements = ['ObjectID','FormattedID','Name','Description', 'Notes','DirectChildrenCount', 'HasParent', 'c_ECommKanbanState', 'c_ReleaseDate','c_RT','c_ReleasePlan']
-    complex_elements = ['Defects',  'Discussion', 'Tasks', 'TestCases', 'Attachments','Projects', 'Children', 'TestCases']
-    
-    # routing is used to dispatch to handler function based on tag 
-    handler_routing = {'Discussion':conversation_handler, 'Attachments':attachment_handler, 'TestCases':default_handler, 'Defects':defect_handler, 'Tasks':tasks_handler}
-    
+     
     details = {}
     for c in us_element.getchildren():
         if c.tag == 'Owner' and c.attrib['refObjectName']:
             details[c.tag] = c.attrib['refObjectName']
             
-        if c.tag in simple_elements:
+        if c.tag in SIMPLE_ELEMENT:
             if non_blank_element(c.text):
                 details[c.tag] = c.text
-        elif c.tag in  complex_elements:
+        elif c.tag in  ARRAY_ELEMENT:
          
             try:
                 child_num = c.find('Count')
@@ -264,30 +221,52 @@ def get_story_details(us_element):
                     continue
                 elif child_num.text <> '0':
                     # if have of list of items stored in _itemRefArray, based on the element type, route to handler functions.  
-                    if c.find('_itemRefArray'):
-                        array_html_line = handler_routing[c.tag](c)
+                    details[c.tag] = commmon_array_handler(c)
+            except KeyError:
+                pass
 
-                    details[c.tag] = ''.join(array_html_line)
-            except KeyError:
-                pass
-        if c.tag == 'Tags':
-            try:
-                    child_c = c.find('Count')
-                    if child_c.text <> '0':
-                        tag_list =[]
-                        my_tags = c.find('_tagsNameArray')
-                        for my_tag in my_tags:
-                            x = my_tag.find('Name').text
-                            tag_list.append(x)
-                        details['Tags'] = ','.join(tag_list)
-            except KeyError:
-                pass
-                
     return details
 
-def parse_xml(fullpath, indexf):
-    
-    LINE_CAP = 30
+        
+
+def generate_detail_page_section(fh, details):
+# fh: file handle for detail story page
+# detail: dict {key= section_heading, value= array of tuples, each tuple is a detail line for complex element_type
+    for heading in SECTION_IN_SEQUENCE:
+        try:
+            
+            body = wrap_section_body_in_html(heading, details[heading])
+            if heading in HEADING_MAPPING:
+                heading = HEADING_MAPPING[heading]
+            section_html = DETAIL_PAGE_SECTION_TEMPLATE.format(heading=heading, body=body)          
+            fh.writelines(section_html)
+        except KeyError:
+            print 'heading doesn\'t exist {}, skipping'.format(heading)
+            continue
+
+
+
+def generate_detail_page(details, out_dir):
+    if details['ObjectID']:
+        fname = details['ObjectID']
+    else:
+        fname = 'dummy'
+    fp = os.path.join(out_dir,fname+'.html')
+        
+    with open(fp, 'wt') as fh:
+        title = details['FormattedID'] + ':' + details['Name']
+        headline = DETAIL_PAGE_HEADER_TEMPLATE.format(title,title) 
+        fh.writelines(headline)
+        fh.writelines(DETAIL_PAGE_STYLE)
+        
+        # output by sections
+        generate_detail_page_section(fh, details)
+
+        fh.writelines(DETAIL_PAGE_FOOTER_TEMPLATE)
+
+
+def process_xml(fullpath, indexf):
+     
     lc = 0
     xf = xt.parse(fullpath)
     
@@ -299,29 +278,22 @@ def parse_xml(fullpath, indexf):
         else:
             details = get_story_details(i)
             detail_page_name = './' + details['ObjectID'] + '.html'
-            line =  '<p> <a href="{}"> {}</a>: {}, {}, {} </p>'.format(detail_page_name, details['FormattedID'], i.attrib['refObjectName'], details['c_ECommKanbanState'], i.attrib['CreatedAt'])
+            line =  INDEX_PAGE_REC_TEMPLATE.format(detail_page_name, details['FormattedID'], i.attrib['refObjectName'], details['c_ECommKanbanState'], i.attrib['CreatedAt'])
             indexf.writelines(line)
             print line
+            
             generate_detail_page(details, output_dir)
+            
             lc += 1
 
 if __name__ == '__main__':
-    
-    ROOT_DIR = os.path.expanduser('~/Downloads/rally_dump')
-    
-    
-    html_header = '<!DOCTYPE html> \
-    <html><head><title>Platform Team User Stories </title> <link rel="stylesheet" href="css/bootstrap.min.css"> </head>\
-    <body><p class="title"><b>Platform team User Stories</b></p>'
-   
-    filename = 'Rally-Stories.xml'
+
     index_file = open(os.path.join(ROOT_DIR, 'index.html'),'wt')
-    index_file.write(html_header)
-    xml_path = os.path.join(ROOT_DIR, filename)
+    index_file.write(INDEX_PAGE_HEADER)
+    xml_path = os.path.join(ROOT_DIR, XML_FILENAME)
     
-    parse_xml(xml_path, index_file)
+    process_xml(xml_path, index_file)
     
+    index_file.write(INDEX_PAGE_FOOTER)
     index_file.close()
-    '''
-    download_defect_details()
-    '''
+    
