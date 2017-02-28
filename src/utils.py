@@ -53,7 +53,7 @@ def init_logging(level=logging.ERROR, mod_name = 'root'):
     
     fh = logging.FileHandler('pull_rally.log')
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    #formatter = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
+
     fh.setFormatter(formatter)
     logger.addHandler(fh)
     return logger

@@ -30,7 +30,7 @@ XML_FILENAME = 'Rally-Stories.xml'
 
 BASE_URL = 
 UNAME = 
-PASS = 
+PASS =  
 
 LINE_CAP = None
 
@@ -98,32 +98,48 @@ def wrap_section_body_in_html(heading, details):
 
 
 def get_conversation_by_url(url):    
+        my_logger = logging.getLogger()
+        
         auth = HTTPBasicAuth(username=UNAME,password=PASS )
-        r = requests.get(url, auth=auth, timeout = 5)
-        if r.status_code == '200':
+        try: 
+            r = requests.get(url, auth=auth, timeout = 300)
+        except requests.exceptions.Timeout:
+            my_logger.info( 'timeout getting conversation details from {}'.format(url))
+            return None
+        if r.status_code == 200:
             root = r.json()
             p_text = root.get('ConversationPost').get('Text')
             p_user = root.get('ConversationPost').get('User').get('_refObjectName')
             p_timestamp = root.get('ConversationPost').get('CreationDate')
             return  p_user, p_timestamp, sanitize_text(p_text)  
         else:
-            my_logger.log(logging.INFO, 'error {} getting conversation detail from {}'.format(r.status_code, url))
+            my_logger.log(logging.ERROR, 'error {} getting conversation detail from {}'.format(r.status_code, url))
             return None 
 
   
 def get_task_by_url(url):
+        my_logger = logging.getLogger()
+        
         auth = HTTPBasicAuth(username=UNAME,password=PASS )
-        r = requests.get(url, auth=auth, timeout = 5)
-        if r.status_code <> '200':
-            my_logger.log(logging.INFO, 'error {} getting task detail from {}'.format(r.status_code, url))
+        try:
+            r = requests.get(url, auth=auth, timeout = 300)
+        except requests.exceptions.Timeout:
+            my_logger.info('timeout getting task details from {}'.format(url))
+            return None
+        if r.status_code <> 200:
+            my_logger.log(logging.ERROR, 'error {} getting task detail from {}'.format(r.status_code, url))
             return None
         else:
-            root = r.json()
+            try: 
+                root = r.json()
+            except:
+                return None
+            
             ta_id = root.get('Task').get('ObjectID')
             ta_name= root.get('Task').get('FormattedID')
             ta_desc = root.get('Task').get('Name')
             link = ''.join(['./Task/', str(ta_id), '.html'])   
-            my_logger.log(logging.INFO, 'task detail: {}'.format(sanitize_text(ta_name)))
+            my_logger.info( 'task detail: {}'.format(sanitize_text(ta_name)))
             return link, sanitize_text(ta_name), sanitize_text(ta_desc)   
     
     
@@ -132,6 +148,7 @@ def get_attachment_by_url(url):
     
     retry_count = 1
     
+    my_logger = logging.getLogger()
     
     t_path = os.path.join(ROOT_DIR,'Attachment')
     
@@ -139,14 +156,20 @@ def get_attachment_by_url(url):
         try:
             os.mkdir(t_path)
         except OSError as e:
-            my_logger.log('failed to mkdir {}, error{}'.format(t_path, e))
+            my_logger.log(logging.ERROR, 'failed to mkdir {}, error{}'.format(t_path, e))
             
     auth = HTTPBasicAuth(username=UNAME, password=PASS)
-    ret = requests.get(url, auth=auth, timeout=5)
-    
-    while ret.status_code <> '200' and retry_count < 5:
-        ret = requests.get(url, auth=auth, timeout=5)
+    try: 
+        ret = requests.get(url, auth=auth, timeout=300)
+    except requests.exceptions.Timeout:
+        my_logger.info('timeout getting attachment details from {}'.format(url))
+        return None
+    while ret.status_code <> 200 and retry_count < 5:
+        ret = requests.get(url, auth=auth, timeout=300)
         retry_count += 1
+    if ret.status_code <> 200:
+        my_logger.log(logging.ERROR, 'maxed out retry, error{} get attachment details from {}'.format(ret.status_code, url))
+        return None
     root = ret.json()
     t_id = root.get('Attachment').get('ObjectID')
     t_content_url = root.get('Attachment').get('Content').get('_ref')
@@ -166,7 +189,16 @@ def get_attachment_by_url(url):
     t_fullpath = os.path.join(t_fullpath, t_content_name)       
         
         # download the attachment file using t_content_url, create file with the original filename
-    ret = requests.get(t_content_url, auth=auth, headers={'User-Agent':'Mozilla/5.0'})
+    try:
+        ret = requests.get(t_content_url, auth=auth, headers={'User-Agent':'Mozilla/5.0'}, timeout=300)
+    except requests.exceptions.Timeout:
+        my_logger.log(logging.ERROR, 'timeout download attachment from {}'.format(t_content_url))
+        return None
+    
+    if ret.status_code <> 200:
+        my_logger.log(logging.ERROR, 'error {} download attachment from {}'.format(ret.status_code, url))
+        return None
+    
     root = ret.json()
 
     with open(t_fullpath, 'wb') as fh:
@@ -176,7 +208,7 @@ def get_attachment_by_url(url):
         
         # t_link is used to create link on the user story detailed page, use relative url 
     t_link = os.path.join('./Attachment', str(t_id), t_content_name)
-    my_logger.log(logging.INFO, 'attachment created for {} {}'.format(t_id, t_content_name)) 
+    my_logger.info('attachment created for {} {}'.format(t_id, t_content_name.encode('utf-8'))) 
     return  t_link.encode('utf-8'), t_content_name.encode('utf-8')  
 
     
@@ -184,7 +216,8 @@ def get_attachment_by_url(url):
 @retry_on_exception
 def get_defect_by_url(url):
     # using laborous native urllib2 method, just for comparison. requests library is more convenient.
-    
+        my_logger = logging.getLogger()
+        
         authenticate_http()
         ret = urllib2.urlopen(url)
         resp = ret.read()
@@ -195,19 +228,21 @@ def get_defect_by_url(url):
             de_name= root.get('Defect').get('FormattedID')
             de_desc = root.get('Defect').get('Name')
             link = ''.join(['./Defect/', str(de_id), '.html'])
-            my_logger.log(logging.INFO, 'defect detail: {}'.format(de_name))
+            my_logger.info( 'defect detail: {}'.format(de_name))
             return link, de_name, sanitize_text(de_desc)
         else:
-            my_logger.log(logging.INFO, 'error getting defect {}'.format(url))
+            my_logger.log(logging.ERROR, 'error getting defect {}'.format(url))
             return None
     
 def extract_from_itemarray(xml_element):
+    my_logger = logging.getLogger()
+    
     for item in xml_element.find('_itemRefArray'):
         try: 
             url_ref = item.attrib['ref']
             yield url_ref
         except KeyError:
-            my_logger.log(logging.INFO, 'ref doesn\'t exist in _itemRefArray')
+            my_logger.log(logging.ERROR, 'ref doesn\'t exist in _itemRefArray')
         except:
             pass
 
@@ -249,7 +284,7 @@ def commmon_array_handler(xml_element):
 
 def get_story_details(us_element):
     
-    my_logger = init_logging(logging.INFO, 'get_story_details')
+    my_logger = init_logging(level=logging.ERROR, mod_name='get_story_details')
     details = {}
     
     
@@ -271,8 +306,9 @@ def get_story_details(us_element):
                 elif child_num.text <> '0':
                     # if have of list of items stored in _itemRefArray, based on the element type, route to handler functions.  
                     details[c.tag] = commmon_array_handler(c)
-                    my_logger.log(logging.INFO, 'tag: {} | {}'.format(c.tag, details[c.tag]))
+                    my_logger.info('tag: {} | {}'.format(c.tag, details[c.tag]))
             except KeyError:
+                my_logger.error('key not exist {}'.format(c.tag))
                 pass
 
     return details
@@ -282,6 +318,9 @@ def get_story_details(us_element):
 def generate_detail_page_section(fh, details):
 # fh: file handle for detail story page
 # detail: dict {key= section_heading, value= array of tuples, each tuple is a detail line for complex element_type
+    my_logger = logging.getLogger()
+    
+    
     for heading in SECTION_IN_SEQUENCE:
         try:
             
@@ -291,7 +330,7 @@ def generate_detail_page_section(fh, details):
             section_html = DETAIL_PAGE_SECTION_TEMPLATE.format(heading=heading, body=body)          
             fh.writelines(section_html)
         except KeyError:
-            my_logger.log(logging.INFO, 'heading doesn\'t exist {}, skipping'.format(heading) )
+            my_logger.warn( 'heading doesn\'t exist {}, skipping'.format(heading) )
             continue
 
 
@@ -320,6 +359,8 @@ def process_xml(fullpath, indexf):
     lc = 0
     xf = xt.parse(fullpath)
     
+    my_logger = logging.getLogger()
+    
     output_dir = os.path.dirname(fullpath)
     
     for i in xf.getroot().getchildren():
@@ -332,9 +373,9 @@ def process_xml(fullpath, indexf):
                 detail_page_name = './' + details['ObjectID'] + '.html'
                 line =  INDEX_PAGE_REC_TEMPLATE.format(detail_page_name, details['FormattedID'], sanitize_text(i.attrib['refObjectName']), sanitize_text(details['c_ECommKanbanState']), i.attrib['CreatedAt'])
                 indexf.writelines(line)
-                my_logger.log(logging.INFO,'started processing {}'.format(details['FormattedID']) )
+                my_logger.info('started processing {}'.format(details['FormattedID']) )
             except KeyError:
-                my_logger.log(logging.INFO, 'KeyError in process_xml')
+                my_logger.log(logging.ERROR, 'KeyError in process_xml')
                 continue    
             generate_detail_page(details, output_dir)
             
@@ -343,7 +384,8 @@ def process_xml(fullpath, indexf):
 
 if __name__ == '__main__':
     
-    my_logger = init_logging(level=logging.INFO)
+    my_logger = init_logging(level=logging.ERROR)
+    
     
     index_file = open(os.path.join(ROOT_DIR, 'index.html'),'wt')
     index_file.write(INDEX_PAGE_HEADER)
